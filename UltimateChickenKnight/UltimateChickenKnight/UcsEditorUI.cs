@@ -85,11 +85,8 @@ public static class UcsEditorUI
 
     private static NamePreview _namePreview;
     
-    private static GameObject _cursorObj;
-    private static float _cursorRot;
-    private static bool _cursorFlipped;
-    private static UcsCursor _cursor;
-    private static SpriteRenderer _cursorRenderer;
+    public static float CursorRot;
+    public static bool CursorFlipped;
 
     private static readonly List<ImageSelector> Images = [];
 
@@ -138,13 +135,6 @@ public static class UcsEditorUI
         
         typeof(EditManager).Hook(nameof(EditManager.ShouldShowCursor),
             (Func<bool> orig) => orig() || UcsEditManager.IsEditing && _currentObject == null);
-        
-        _cursorObj = new GameObject("[UCS] Cursor");
-        _cursorObj.SetActive(false);
-        Object.DontDestroyOnLoad(_cursorObj);
-        
-        _cursor = _cursorObj.AddComponent<UcsCursor>();
-        _cursorRenderer = _cursorObj.AddComponent<SpriteRenderer>();
         
         var userInfo = UIUtils.MakeImage("User Info", _ui, Vector2.zero,
             new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
@@ -352,50 +342,22 @@ public static class UcsEditorUI
         
         _selector.SetActive(false);
         _namePreview.gameObject.SetActive(false);
-        _cursorObj.SetActive(true);
         foreach (var fc in ForeignCursors.Values) fc.gameObject.SetActive(true);
-        _cursorRot = 0;
-        _cursorFlipped = false;
-        
+        CursorRot = 0;
+        CursorFlipped = false;
+
+        UcsCursorManager.ObjectChanged = true;
         RefreshCursor();
     }
 
     private static void RefreshCursor()
     {
-        Vector3 offset = default;
-        var rot = 0f;
-        if (_currentObject is PlaceableObject obj)
-        {
-            rot += _cursorRot + obj.Rotation;
-
-            _cursorRenderer.sprite = obj.Sprite;
-
-            offset = PreviewUtils.FixPreview(
-                _cursorRenderer,
-                obj,
-                _cursorFlipped,
-                rot,
-                1);
-            offset.z += obj.ZPosition + 0.001f;
-
-            rot += obj.ChildRotation + obj.Tk2dRotation;
-            _cursorObj.transform.localScale = obj.LossyScale;
-
-            foreach (var config in obj.ConfigGroup.Select(cfg => cfg.GetDefaultValue())
-                         .Where(dv => dv != null).OrderBy(configVal => configVal.GetPriority()))
-                config.SetupPreview(_cursorObj, ConfigurationManager.PreviewContext.Cursor);
-        }
-        else
-        {
-            _cursorRenderer.sprite = _currentObject.GetUISprite();
-            _cursorObj.transform.localScale = new Vector3(0.2f, 0.2f);
-        }
-
-        _cursor.offset = offset;
-        _cursorObj.transform.SetRotation2D(rot);
+        UcsCursorManager.Refresh(_currentObject);
     }
+
+    private static ObjectPlacement _bluePlacement;
     
-    private class UcsCursor : MonoBehaviour
+    public class UcsCursor : MonoBehaviour
     {
         public Vector3 offset;
         
@@ -419,16 +381,16 @@ public static class UcsEditorUI
                 else return;
                 if (Input.GetKey(KeyCode.LeftShift)) i = -i;
 
-                var rot = _cursorRot + i;
+                var rot = CursorRot + i;
                 if (group == RotationGroup.Three && Mathf.Approximately(rot, 180)) rot = 270;
 
-                _cursorRot = rot;
+                CursorRot = rot;
                 RefreshCursor();
             }
 
             if (Settings.Flip.WasPressed)
             {
-                _cursorFlipped = !_cursorFlipped;
+                CursorFlipped = !CursorFlipped;
                 RefreshCursor();
             }
             
@@ -444,52 +406,75 @@ public static class UcsEditorUI
                 transform.position,
                 transform.localScale);
 
-            if (!Input.GetMouseButtonDown(0)) return;
-
             if (_currentObject is PlaceableObject placeable)
             {
-                var pos = EditManager.GetWorldPos(Input.mousePosition);
-                pos.z = placeable.ZPosition;
-
-                if (UcsObjects.SafeRanges.Any(o =>
-                    {
-                        var closest = _cursorRenderer.bounds.ClosestPoint(o.transform.position);
-                        if (_currentObject.GetName() == "Falling Lava") closest.y = o.transform.GetPositionY();
-                        return o && o.WithinRange(closest);
-                    }))
+                if (Input.GetMouseButtonDown(0))
                 {
-                    StartCoroutine(BlinkRed());
-                    return;
+                    var pos = EditManager.GetWorldPos(Input.mousePosition);
+                    pos.z = placeable.ZPosition;
+
+                    if (UcsObjects.SafeRanges.Any(o =>
+                        {
+                            return UcsCursorManager.Mrs.Any(m =>
+                            {
+                                if (!m) return false;
+                                if (m.name.Contains("haze") || m.name.Contains("Light")) return false;
+                                var closest = m.bounds.ClosestPoint(o.transform.position);
+                                if (_currentObject.GetName() == "Falling Lava") closest.y = o.transform.GetPositionY();
+                                return o && o.WithinRange(closest);
+                            }) || UcsCursorManager.Srs.Any(m =>
+                            {
+                                if (!m) return false;
+                                if (m.name.Contains("haze") || m.name.Contains("Light")) return false;
+                                var closest = m.bounds.ClosestPoint(o.transform.position);
+                                if (_currentObject.GetName() == "Falling Lava") closest.y = o.transform.GetPositionY();
+                                return o && o.WithinRange(closest);
+                            });
+                        }))
+                    {
+                        StartCoroutine(BlinkRed());
+                        return;
+                    }
+
+                    gameObject.SetActive(false);
+                    var obj = new ObjectPlacement(
+                        placeable,
+                        pos,
+                        $"{Guid.NewGuid().ToString()[..8]} [UCS]",
+                        CursorFlipped,
+                        CursorRot,
+                        1,
+                        false,
+                        0,
+                        [],
+                        [],
+                        placeable.ConfigGroup
+                            .Select(cfg => cfg.GetDefaultValue())
+                            .Where(dv => dv != null).ToArray()
+                    );
+
+                    UcsClientAddon.DoPlace(obj);
                 }
-
-                gameObject.SetActive(false);
-                var obj = new ObjectPlacement(
-                    placeable, 
-                    pos,
-                    $"{Guid.NewGuid().ToString()[..8]} [UCS]",
-                    _cursorFlipped,
-                    _cursorRot,
-                    1,
-                    false,
-                    0,
-                    [],
-                    [],
-                    placeable.ConfigGroup
-                        .Select(cfg => cfg.GetDefaultValue())
-                        .Where(dv => dv != null).ToArray()
-                );
-
-                UcsClientAddon.DoPlace(obj);
             }
             else
             {
                 var placement = UcsEditManager.CurrentEdits.Placements
                     .FirstOrDefault(placement => placement.Touching(Input.mousePosition));
 
+                if (_bluePlacement != placement)
+                {
+                    _bluePlacement?.ClearHoverColour();
+                    _bluePlacement = placement;
+                    _bluePlacement?.SetHoverColour();
+                }
+
                 if (placement == null) return;
-                
-                gameObject.SetActive(false);
-                UcsClientAddon.DoErase(placement);
+
+                if (Input.GetMouseButtonDown(0))
+                {
+                    gameObject.SetActive(false);
+                    UcsClientAddon.DoErase(placement);
+                }
             }
         }
 
@@ -497,16 +482,18 @@ public static class UcsEditorUI
         {
             for (var i = 0f; i < 1f; i += 0.1f)
             {
-                _cursorRenderer.color = Color.Lerp(Color.white, Color.red, i);
+                var c = Color.Lerp(Color.white, Color.red, i);
+                UcsCursorManager.CursorPreview.Settings = new PreviewUtils.PreviewSettings(c.r, c.g, c.b, 1);
                 yield return new WaitForSeconds(0.01f);
             }
             for (var i = 0f; i < 1f; i += 0.1f)
             {
-                _cursorRenderer.color = Color.Lerp(Color.red, Color.white, i);
+                var c = Color.Lerp(Color.red, Color.white, i);
+                UcsCursorManager.CursorPreview.Settings = new PreviewUtils.PreviewSettings(c.r, c.g, c.b, 1);
                 yield return new WaitForSeconds(0.01f);
             }
 
-            _cursorRenderer.color = Color.white;
+            UcsCursorManager.CursorPreview.Settings = new PreviewUtils.PreviewSettings(1, 1, 1, 1);
         }
     }
 
@@ -531,21 +518,53 @@ public static class UcsEditorUI
         if (got) yield return obj.EnsureLoaded();
 
         var cursor = ForeignCursors[data.Id];
-        cursor.transform.position = new Vector3(data.Pos.Item1, data.Pos.Item2, data.Pos.Item3);
-        cursor.transform.SetRotation2D(data.Rotation);
-        cursor.transform.localScale = new Vector3(data.Scale.Item1, data.Scale.Item2, data.Scale.Item3);
-        cursor.renderer.sprite = got
-            ? obj.Sprite
-            : UcsEraser.Instance.GetUISprite();
+        cursor.Setup(obj);
+        cursor.UpdatePreview(data);
     }
 
     private class UcsForeignCursor : MonoBehaviour
     {
+        public GameObject preview;
         public SpriteRenderer renderer;
-
+        private PlaceableObject _obj;
+        
         private void Update()
         {
             if (!UcsEditManager.IsEditing) gameObject.SetActive(false);
+        }
+
+        public void Setup(PlaceableObject obj)
+        {
+            if (obj == _obj && preview) return;
+            _obj = obj;
+            
+            if (preview && preview != gameObject) Destroy(preview);
+            
+            if (obj != null)
+            {
+                renderer.sprite = null;
+
+                var placement = obj.PreparePlacement(Vector3.zero);
+                var g = placement.PlaceGhost();
+                g.transform.SetParent(transform);
+                g.GetComponentInChildren<PreviewUtils.Preview>().Settings =
+                    new PreviewUtils.PreviewSettings(0.2f, 0.8f, 1.0f, 0.6f);
+                preview = g;
+            }
+            else
+            {
+                preview = gameObject;
+                renderer.sprite = UcsEraser.Instance.GetUISprite();
+            }
+        }
+
+        public void UpdatePreview(CursorInfoPacket data)
+        {
+            if (!preview) return;
+            
+            preview.transform.position = new Vector3(data.Pos.Item1, data.Pos.Item2, data.Pos.Item3);
+            preview.transform.SetRotation2D(data.Rotation);
+            preview.transform.localScale = new Vector3(data.Scale.Item1, data.Scale.Item2, data.Scale.Item3);
         }
     }
 

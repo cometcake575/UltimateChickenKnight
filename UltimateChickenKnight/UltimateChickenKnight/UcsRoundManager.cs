@@ -10,12 +10,16 @@ public static class UcsRoundManager
 {
     public static void Init()
     {
-        ModHooks.BeforePlayerDeadHook += () => Died(UltimateChickenKnight.DeathType.Death);
-        
-        On.HeroController.TakeDamage += (orig, self, go, side, amount, type) =>
+        ModHooks.TakeDamageHook += (ref type, damage) =>
         {
+            if (damage == 0) return damage;
             Died(type == 1 ? UltimateChickenKnight.DeathType.Damage : UltimateChickenKnight.DeathType.Hazard);
-            orig(self, go, side, amount, type);
+            if (damage >= PlayerData._instance.health)
+            {
+                Died(UltimateChickenKnight.DeathType.Death);
+                return 0;
+            }
+            return damage;
         };
     }
 

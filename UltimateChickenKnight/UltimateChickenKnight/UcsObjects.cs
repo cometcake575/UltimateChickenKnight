@@ -154,19 +154,21 @@ public static class UcsObjects
 
         return safeRange;
     }
-
-    public class SafeRange : MonoBehaviour
+    
+    public class SafeRange : PreviewableBehaviour
     {
         private SpriteRenderer _renderer;
         
         private void Start()
         {
+            if (isAPreview) return;
             transform.SetParent(null, true);
             _renderer = GetComponent<SpriteRenderer>();
         }
 
         private void Update()
         {
+            if (isAPreview) return;
             _renderer.enabled = UcsEditManager.IsEditing || !UcsEditManager.IsPlaying;
         }
 
@@ -175,10 +177,19 @@ public static class UcsObjects
             return Vector2.Distance(transform.position, pos) <= transform.GetScaleX() / 2;
         }
 
-        private void OnEnable() => SafeRanges.Add(this);
-        private void OnDisable() => SafeRanges.Remove(this);
-    }
+        private void OnEnable()
+        {
+            if (isAPreview) return;
+            SafeRanges.Add(this);
+        }
 
+        private void OnDisable()
+        {
+            if (isAPreview) return;
+            SafeRanges.Remove(this);
+        }
+    }
+    
     public class StartPoint : MonoBehaviour
     {
         public bool isRight;
