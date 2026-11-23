@@ -2,7 +2,6 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using Architect.Config;
 using Architect.Editor;
 using Architect.Objects;
 using Architect.Objects.Categories;
@@ -544,7 +543,7 @@ public static class UcsEditorUI
             {
                 renderer.sprite = null;
 
-                var placement = obj.PreparePlacement(Vector3.zero);
+                var placement = obj.PreparePlacement(Vector3.zero, null, out _);
                 var g = placement.PlaceGhost();
                 g.transform.SetParent(transform);
                 g.GetComponentInChildren<PreviewUtils.Preview>().Settings =

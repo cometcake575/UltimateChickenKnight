@@ -12,7 +12,7 @@ public static class UcsRoundManager
     {
         ModHooks.TakeDamageHook += (ref type, damage) =>
         {
-            if (damage == 0) return damage;
+            if (!UcsEditManager.IsPlaying || damage == 0) return damage;
             Died(type == 1 ? UltimateChickenKnight.DeathType.Damage : UltimateChickenKnight.DeathType.Hazard);
             if (damage >= PlayerData._instance.health)
             {
